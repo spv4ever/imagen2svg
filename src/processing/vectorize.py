@@ -20,7 +20,12 @@ def _format_path(points: np.ndarray) -> str:
 
 def _contours_to_paths(mask: np.ndarray, fill: str = "#000000") -> list[str]:
     foreground = cv2.bitwise_not(mask) if np.mean(mask) > 127 else mask
-    contours, hierarchy = cv2.findContours(foreground, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
+    foreground = cv2.copyMakeBorder(
+        foreground, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0
+    )
+    contours, hierarchy = cv2.findContours(
+        foreground, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS
+    )
     if hierarchy is None:
         return []
 
@@ -36,11 +41,15 @@ def _contours_to_paths(mask: np.ndarray, fill: str = "#000000") -> list[str]:
         stack = [index]
         while stack:
             current = stack.pop()
-            current_contour = contours[current]
+            current_contour = contours[current] - np.array(
+                [[[1, 1]]], dtype=contours[current].dtype
+            )
             if cv2.contourArea(current_contour) >= min_area:
-                epsilon = max(0.7, 0.0015 * cv2.arcLength(current_contour, True))
+                epsilon = max(0.35, 0.0008 * cv2.arcLength(current_contour, True))
                 approx = cv2.approxPolyDP(current_contour, epsilon, True)
                 points = approx.reshape(-1, 2)
+                points[:, 0] = np.clip(points[:, 0], 0, mask.shape[1] - 1)
+                points[:, 1] = np.clip(points[:, 1], 0, mask.shape[0] - 1)
                 if len(points) >= 3:
                     subpaths.append(_format_path(points))
 

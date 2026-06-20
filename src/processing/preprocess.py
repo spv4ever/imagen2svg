@@ -47,6 +47,24 @@ def _foreground_is_light(gray: np.ndarray, thresholded: np.ndarray) -> bool:
     return not background_is_light and float(light_pixels.mean()) > float(dark_pixels.mean())
 
 
+def _remove_colored_annotations(image: np.ndarray) -> np.ndarray:
+    """Turn saturated, non-neutral pixels into white before line-art tracing.
+
+    Hand-marked references often contain red/blue guide circles or notes. In
+    grayscale those colors become dark enough to be traced as real geometry, so
+    remove highly saturated colored pixels for monochrome modes while keeping
+    black, white and gray artwork untouched.
+    """
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    colored = (saturation > 60) & (value > 45)
+    cleaned = image.copy()
+    cleaned[colored] = (255, 255, 255)
+    return cleaned
+
+
 def _binary_from_gray(gray: np.ndarray, *, clean: bool = False) -> np.ndarray:
     height, width = gray.shape[:2]
     scale = max(height, width)
@@ -117,7 +135,8 @@ def _color_layers(image: np.ndarray) -> tuple[np.ndarray, list[tuple[str, np.nda
 
 def preprocess(path: str, mode: VectorMode) -> PreprocessResult:
     image = load_image(path)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    line_art_image = _remove_colored_annotations(image)
+    gray = cv2.cvtColor(line_art_image, cv2.COLOR_BGR2GRAY)
 
     if mode == VectorMode.SIMPLE:
         bitmap = _binary_from_gray(gray)
