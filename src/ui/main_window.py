@@ -1,4 +1,4 @@
-"""PySide6 drag-and-drop interface for Inkscape PNG-to-SVG export."""
+"""PySide6 drag-and-drop interface for PNG-to-vector-SVG export."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 )
 
 from src.output.export_manager import SUPPORTED_EXTENSIONS, export_batch
-from src.processing.inkscape import is_inkscape_available
 
 
 class MainWindow(QMainWindow):
@@ -34,17 +33,14 @@ class MainWindow(QMainWindow):
         self.queue = QListWidget()
         self.queue.currentRowChanged.connect(self._update_preview)
         self.before = QLabel("Arrastra PNG aquí")
-        self.after = QLabel("Exportación directa con Inkscape")
+        self.after = QLabel("SVG vectorial compatible con CAD")
         for label in (self.before, self.after):
             label.setAlignment(Qt.AlignCenter)
             label.setMinimumSize(320, 260)
             label.setStyleSheet("border: 1px dashed #888; padding: 12px;")
 
-        self.inkscape_available = is_inkscape_available()
         self.status_label = QLabel(
-            "Inkscape disponible: exportación PNG → SVG plain"
-            if self.inkscape_available
-            else "Inkscape no está disponible: instala Inkscape o añádelo al PATH"
+            "Vectorización PNG → SVG con trazados reales para Fusion 360"
         )
         self.progress = QProgressBar()
 
@@ -113,14 +109,6 @@ class MainWindow(QMainWindow):
         if not self.files:
             QMessageBox.information(self, "Sin imágenes", "Añade al menos un PNG.")
             return
-        if not self.inkscape_available:
-            QMessageBox.critical(
-                self,
-                "Inkscape requerido",
-                "Instala Inkscape o añade su ejecutable al PATH para exportar SVG plain.",
-            )
-            return
-
         output_dir = (
             QFileDialog.getExistingDirectory(self, "Elegir carpeta de salida", "output")
             or "output"
@@ -132,8 +120,8 @@ class MainWindow(QMainWindow):
                 results.extend(export_batch([path], output_dir))
                 self.progress.setValue(index)
         except RuntimeError as error:
-            QMessageBox.critical(self, "Error de Inkscape", str(error))
+            QMessageBox.critical(self, "Error de exportación", str(error))
             return
         QMessageBox.information(
-            self, "Listo", f"Exportados {len(results)} SVG plain en {output_dir}."
+            self, "Listo", f"Exportados {len(results)} SVG vectoriales en {output_dir}."
         )
