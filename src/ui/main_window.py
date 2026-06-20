@@ -55,12 +55,12 @@ class MainWindow(QMainWindow):
         self.mode.addItems(MODE_LABELS.keys())
         self.mode.currentIndexChanged.connect(self._update_preview)
         self.inkscape_available = is_inkscape_available()
-        self.use_inkscape = QCheckBox("Exportar SVG directamente con Inkscape")
+        self.use_inkscape = QCheckBox("Exportar SVG plano con Inkscape")
         self.use_inkscape.setChecked(self.inkscape_available)
         self.use_inkscape.setEnabled(self.inkscape_available)
         if not self.inkscape_available:
             self.use_inkscape.setToolTip(
-                "Instala Inkscape o añade su ejecutable al PATH para exportar directamente."
+                "Instala Inkscape o añade su ejecutable al PATH para guardar SVG plano."
             )
         self.progress = QProgressBar()
 

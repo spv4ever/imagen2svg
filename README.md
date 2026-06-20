@@ -9,7 +9,7 @@ Vectorizador local y gratuito para convertir imágenes PNG/JPG en SVG y PNG limp
 3. Elige un modo de vectorización.
 4. Procesa el lote.
 5. Exporta un SVG y un PNG limpio por archivo.
-6. Si tienes Inkscape instalado, activa la exportación directa para generar el SVG con los parámetros estándar de Inkscape.
+6. Si tienes Inkscape instalado, activa la exportación como SVG plano para reexportar el SVG final con los parámetros estándar de Inkscape.
 
 ## Modos incluidos
 
@@ -28,9 +28,9 @@ pip install -r requirements.txt
 
 ## Integración opcional con Inkscape
 
-La interfaz detecta el ejecutable `inkscape` en el `PATH`. Si está disponible, marca por defecto **Exportar SVG directamente con Inkscape** y, al exportar, Inkscape abre la imagen original y la guarda como SVG plano con sus parámetros estándar (`--export-type=svg`, `--export-plain-svg` y `--export-filename`). Este flujo evita las diferencias que puede introducir el trazado interno de OpenCV en el modo simple y conserva mejor el aspecto de la imagen de entrada.
+La interfaz detecta el ejecutable `inkscape` en el `PATH`. Si está disponible, marca por defecto **Exportar SVG plano con Inkscape** y, al exportar, primero genera el SVG con el vectorizador interno y después pide a Inkscape que lo reescriba como SVG plano con sus parámetros estándar (`--export-type=svg`, `--export-plain-svg` y `--export-filename`). Así el resultado sigue siendo vectorial y queda normalizado como plain SVG de Inkscape.
 
-Si Inkscape no está disponible o falla la exportación directa, la aplicación usa automáticamente el vectorizador interno como respaldo. Si la casilla aparece desactivada, instala Inkscape o añade su ejecutable al `PATH` antes de lanzar la aplicación.
+Si Inkscape no está disponible o falla la reexportación como SVG plano, la aplicación conserva automáticamente el SVG generado por el vectorizador interno. Si la casilla aparece desactivada, instala Inkscape o añade su ejecutable al `PATH` antes de lanzar la aplicación.
 
 ## Uso
 
