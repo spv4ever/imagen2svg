@@ -40,7 +40,8 @@ class MainWindow(QMainWindow):
             label.setStyleSheet("border: 1px dashed #888; padding: 12px;")
 
         self.status_label = QLabel(
-            "Vectorización PNG → SVG con trazados reales para Fusion 360"
+            "Pasada simple · Corte de luminosidad 0.450 · "
+            "Motas 2 · Suavizar 1.00 · Optimizar 0.200"
         )
         self.progress = QProgressBar()
 

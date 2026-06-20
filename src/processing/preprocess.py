@@ -18,10 +18,24 @@ class VectorMode(str, Enum):
 
 
 @dataclass(frozen=True)
+class TraceSettings:
+    """Settings equivalent to Inkscape's single-scan brightness cutoff trace."""
+
+    brightness_threshold: float = 0.45
+    speckles: int = 2
+    smooth_corners: float = 1.0
+    optimize_tolerance: float = 0.2
+
+
+INKSCAPE_SINGLE_SCAN_SETTINGS = TraceSettings()
+
+
+@dataclass(frozen=True)
 class PreprocessResult:
     mode: VectorMode
     bitmap: np.ndarray
     preview: Image.Image
+    trace_settings: TraceSettings = INKSCAPE_SINGLE_SCAN_SETTINGS
     color_layers: list[tuple[str, np.ndarray]] | None = None
     background_color: str | None = None
 
@@ -65,22 +79,55 @@ def _remove_colored_annotations(image: np.ndarray) -> np.ndarray:
     return cleaned
 
 
-def _binary_from_gray(gray: np.ndarray, *, clean: bool = False) -> np.ndarray:
+def _binary_from_gray(
+    gray: np.ndarray,
+    *,
+    clean: bool = False,
+    settings: TraceSettings = INKSCAPE_SINGLE_SCAN_SETTINGS,
+) -> np.ndarray:
+    """Create a bitmap using the approved Inkscape Trace Bitmap settings.
+
+    The reference configuration is a single scan with brightness cutoff at
+    0.450, speckles enabled at 2 px, smooth corners at 1.00 and optimization at
+    0.200. Preprocessing mirrors those inputs before contour extraction.
+    """
+
     height, width = gray.shape[:2]
     scale = max(height, width)
-    blur_size = _ensure_odd(max(3, min(9, scale // 180)))
+    blur_size = _ensure_odd(max(3, min(9, scale // 180))) if clean else 3
     blurred = cv2.GaussianBlur(gray, (blur_size, blur_size), 0)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(blurred)
-    thresholded = cv2.threshold(clahe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    cutoff = int(round(np.clip(settings.brightness_threshold, 0.0, 1.0) * 255))
+    thresholded = cv2.threshold(blurred, cutoff, 255, cv2.THRESH_BINARY)[1]
 
     if _foreground_is_light(gray, thresholded):
         thresholded = cv2.bitwise_not(thresholded)
 
+    if settings.speckles > 0:
+        minimum_area = float(settings.speckles * settings.speckles)
+        foreground = (
+            cv2.bitwise_not(thresholded)
+            if np.mean(thresholded) > 127
+            else thresholded
+        )
+        components, labels, stats, _ = cv2.connectedComponentsWithStats(foreground, 8)
+        cleaned_foreground = np.zeros_like(foreground)
+        for label in range(1, components):
+            if stats[label, cv2.CC_STAT_AREA] >= minimum_area:
+                cleaned_foreground[labels == label] = 255
+        thresholded = (
+            cv2.bitwise_not(cleaned_foreground)
+            if np.mean(thresholded) > 127
+            else cleaned_foreground
+        )
+
     if clean:
         kernel_size = max(2, min(5, scale // 260))
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-        thresholded = cv2.morphologyEx(thresholded, cv2.MORPH_OPEN, kernel, iterations=1)
-        thresholded = cv2.morphologyEx(thresholded, cv2.MORPH_CLOSE, kernel, iterations=1)
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
+        )
+        thresholded = cv2.morphologyEx(
+            thresholded, cv2.MORPH_CLOSE, kernel, iterations=1
+        )
         thresholded = cv2.medianBlur(thresholded, 3)
 
     return thresholded
