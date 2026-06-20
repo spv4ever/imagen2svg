@@ -12,10 +12,10 @@ Vectorizador local y gratuito para convertir imágenes PNG/JPG en SVG y PNG limp
 
 ## Modos incluidos
 
-- **SVG simple**: blanco/negro y vectorización básica.
-- **SVG limpio**: reducción de ruido y suavizado antes de vectorizar.
+- **SVG simple**: blanco/negro con contraste local para separar mejor sujeto y fondo.
+- **SVG limpio**: reducción de ruido, cierre de huecos pequeños y suavizado antes de vectorizar.
 - **SVG impresión 3D**: máximo contraste, líneas más sólidas y cierre de cortes pequeños.
-- **SVG por colores**: reducción a cuatro colores y creación de trazados por color.
+- **SVG por colores**: cuantización adaptativa, color de fondo separado y creación de trazados por color.
 
 ## Instalación
 

@@ -11,22 +11,47 @@ import numpy as np
 from src.processing.preprocess import PreprocessResult, VectorMode
 
 
+def _format_path(points: np.ndarray) -> str:
+    commands = [f"M {int(points[0][0])} {int(points[0][1])}"]
+    commands.extend(f"L {int(x)} {int(y)}" for x, y in points[1:])
+    commands.append("Z")
+    return " ".join(commands)
+
+
 def _contours_to_paths(mask: np.ndarray, fill: str = "#000000") -> list[str]:
     foreground = cv2.bitwise_not(mask) if np.mean(mask) > 127 else mask
-    contours, _ = cv2.findContours(foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv2.findContours(foreground, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
+    if hierarchy is None:
+        return []
+
     paths: list[str] = []
-    for contour in contours:
-        if cv2.contourArea(contour) < 4:
+    image_area = mask.shape[0] * mask.shape[1]
+    min_area = max(3.0, image_area * 0.00001)
+    for index, contour in enumerate(contours):
+        parent = hierarchy[0][index][3]
+        if parent != -1 or cv2.contourArea(contour) < min_area:
             continue
-        epsilon = 0.002 * cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, epsilon, True)
-        points = approx.reshape(-1, 2)
-        if len(points) < 3:
-            continue
-        commands = [f"M {points[0][0]} {points[0][1]}"]
-        commands.extend(f"L {x} {y}" for x, y in points[1:])
-        commands.append("Z")
-        paths.append(f'<path d="{html.escape(" ".join(commands))}" fill="{fill}"/>')
+
+        subpaths: list[str] = []
+        stack = [index]
+        while stack:
+            current = stack.pop()
+            current_contour = contours[current]
+            if cv2.contourArea(current_contour) >= min_area:
+                epsilon = max(0.7, 0.0015 * cv2.arcLength(current_contour, True))
+                approx = cv2.approxPolyDP(current_contour, epsilon, True)
+                points = approx.reshape(-1, 2)
+                if len(points) >= 3:
+                    subpaths.append(_format_path(points))
+
+            child = hierarchy[0][current][2]
+            while child != -1:
+                stack.append(child)
+                child = hierarchy[0][child][0]
+
+        if subpaths:
+            path_data = html.escape(" ".join(subpaths))
+            paths.append(f'<path d="{path_data}" fill="{fill}" fill-rule="evenodd"/>')
     return paths
 
 
@@ -35,8 +60,11 @@ def vectorize_to_svg(result: PreprocessResult, title: str | None = None) -> str:
     height, width = bitmap.shape[:2]
     title_markup = f"<title>{html.escape(title)}</title>" if title else ""
 
+    extra_markup = ""
     if result.mode == VectorMode.COLORS and result.color_layers:
         paths: list[str] = []
+        if result.background_color:
+            extra_markup = f'  <rect width="100%" height="100%" fill="{result.background_color}"/>\n'
         for color, mask in result.color_layers:
             paths.extend(_contours_to_paths(mask, fill=color))
     else:
@@ -47,6 +75,7 @@ def vectorize_to_svg(result: PreprocessResult, title: str | None = None) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img">\n'
         f"  {title_markup}\n"
+        f"{extra_markup}"
         f"  {body}\n"
         "</svg>\n"
     )
