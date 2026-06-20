@@ -9,6 +9,7 @@ Vectorizador local y gratuito para convertir imágenes PNG/JPG en SVG y PNG limp
 3. Elige un modo de vectorización.
 4. Procesa el lote.
 5. Exporta un SVG y un PNG limpio por archivo.
+6. Si tienes Inkscape instalado, activa la optimización opcional para reescribir el SVG como “plain SVG”.
 
 ## Modos incluidos
 
@@ -24,6 +25,12 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+## Integración opcional con Inkscape
+
+La interfaz detecta el ejecutable `inkscape` en el `PATH`. Si está disponible, marca por defecto **Optimizar SVG con Inkscape** y, al exportar, pasa cada SVG generado por Inkscape con `--export-plain-svg`. Esto normaliza el SVG final y suele mejorar la compatibilidad con otros programas sin obligarte a instalar dependencias adicionales de Python.
+
+Si la casilla aparece desactivada, instala Inkscape o añade su ejecutable al `PATH` antes de lanzar la aplicación.
 
 ## Uso
 

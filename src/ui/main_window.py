@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QCheckBox,
     QPushButton,
     QComboBox,
     QProgressBar,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.output.export_manager import SUPPORTED_EXTENSIONS, export_batch
+from src.processing.inkscape import is_inkscape_available
 from src.processing.preprocess import VectorMode, preprocess
 
 
@@ -52,6 +54,14 @@ class MainWindow(QMainWindow):
         self.mode = QComboBox()
         self.mode.addItems(MODE_LABELS.keys())
         self.mode.currentIndexChanged.connect(self._update_preview)
+        self.inkscape_available = is_inkscape_available()
+        self.use_inkscape = QCheckBox("Optimizar SVG con Inkscape")
+        self.use_inkscape.setChecked(self.inkscape_available)
+        self.use_inkscape.setEnabled(self.inkscape_available)
+        if not self.inkscape_available:
+            self.use_inkscape.setToolTip(
+                "Instala Inkscape o añade su ejecutable al PATH para activar esta mejora."
+            )
         self.progress = QProgressBar()
 
         add_button = QPushButton("Añadir imágenes")
@@ -61,6 +71,7 @@ class MainWindow(QMainWindow):
 
         controls = QHBoxLayout()
         controls.addWidget(self.mode)
+        controls.addWidget(self.use_inkscape)
         controls.addWidget(add_button)
         controls.addWidget(process_button)
 
@@ -86,7 +97,9 @@ class MainWindow(QMainWindow):
         self._add_files([Path(url.toLocalFile()) for url in event.mimeData().urls()])
 
     def _choose_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Seleccionar imágenes", "input", "Images (*.png *.jpg *.jpeg)")
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Seleccionar imágenes", "input", "Images (*.png *.jpg *.jpeg)"
+        )
         self._add_files([Path(path) for path in paths])
 
     def _add_files(self, paths: list[Path]) -> None:
@@ -105,12 +118,18 @@ class MainWindow(QMainWindow):
         if row < 0 or row >= len(self.files):
             return
         source = self.files[row]
-        self.before.setPixmap(QPixmap(str(source)).scaled(self.before.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.before.setPixmap(
+            QPixmap(str(source)).scaled(self.before.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
         result = preprocess(str(source), self._current_mode())
         temp_preview = Path("temp/preview.png")
         temp_preview.parent.mkdir(exist_ok=True)
         result.preview.save(temp_preview)
-        self.after.setPixmap(QPixmap(str(temp_preview)).scaled(self.after.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.after.setPixmap(
+            QPixmap(str(temp_preview)).scaled(
+                self.after.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        )
 
     def _process_batch(self) -> None:
         if not self.files:
@@ -120,6 +139,15 @@ class MainWindow(QMainWindow):
         self.progress.setMaximum(len(self.files))
         results = []
         for index, path in enumerate(self.files, start=1):
-            results.extend(export_batch([path], output_dir, self._current_mode()))
+            results.extend(
+                export_batch(
+                    [path],
+                    output_dir,
+                    self._current_mode(),
+                    use_inkscape=self.use_inkscape.isChecked(),
+                )
+            )
             self.progress.setValue(index)
-        QMessageBox.information(self, "Listo", f"Exportados {len(results)} SVG/PNG en {output_dir}.")
+        QMessageBox.information(
+            self, "Listo", f"Exportados {len(results)} SVG/PNG en {output_dir}."
+        )
