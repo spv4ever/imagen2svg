@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.processing.inkscape import plain_svg_with_inkscape
+from src.processing.inkscape import export_image_with_inkscape
 from src.processing.preprocess import VectorMode, preprocess
 from src.processing.svg_cleaner import optimize_svg
 from src.processing.vectorize import save_svg, vectorize_to_svg
@@ -29,10 +29,11 @@ def export_file(
     svg_path = destination / f"{stem}.svg"
     png_path = destination / f"{stem}-clean.png"
 
-    svg = optimize_svg(vectorize_to_svg(result, title=source.name))
-    save_svg(svg, svg_path)
-    if use_inkscape:
-        plain_svg_with_inkscape(svg_path)
+    if use_inkscape and export_image_with_inkscape(source, svg_path):
+        pass
+    else:
+        svg = optimize_svg(vectorize_to_svg(result, title=source.name))
+        save_svg(svg, svg_path)
     result.preview.save(png_path)
     return svg_path, png_path
 
