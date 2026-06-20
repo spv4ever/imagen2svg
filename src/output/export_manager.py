@@ -1,51 +1,37 @@
-"""Batch export orchestration."""
+"""Batch export orchestration using Inkscape only."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from src.processing.inkscape import plain_svg_with_inkscape
-from src.processing.preprocess import VectorMode, preprocess
-from src.processing.svg_cleaner import optimize_svg
-from src.processing.vectorize import save_svg, vectorize_to_svg
+from src.processing.inkscape import export_image_with_inkscape
+
+SUPPORTED_EXTENSIONS = {".png"}
 
 
-SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg"}
-
-
-def export_file(
-    input_path: str | Path,
-    output_dir: str | Path,
-    mode: VectorMode,
-    *,
-    use_inkscape: bool = False,
-) -> tuple[Path, Path]:
+def export_file(input_path: str | Path, output_dir: str | Path) -> Path:
+    """Export a PNG directly to an Inkscape plain SVG."""
     source = Path(input_path)
+    if source.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported input format: {source.suffix}. Only PNG is supported."
+        )
+
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
 
-    result = preprocess(str(source), mode)
-    stem = f"{source.stem}-{mode.value}"
-    svg_path = destination / f"{stem}.svg"
-    png_path = destination / f"{stem}-clean.png"
-
-    svg = optimize_svg(vectorize_to_svg(result, title=source.name))
-    save_svg(svg, svg_path)
-    if use_inkscape:
-        plain_svg_with_inkscape(svg_path)
-    result.preview.save(png_path)
-    return svg_path, png_path
+    svg_path = destination / f"{source.stem}.svg"
+    if not export_image_with_inkscape(source, svg_path):
+        raise RuntimeError(
+            "Inkscape is required to export PNG files as plain SVG. "
+            "Install Inkscape or add its executable to PATH."
+        )
+    return svg_path
 
 
-def export_batch(
-    files: list[str | Path],
-    output_dir: str | Path,
-    mode: VectorMode,
-    *,
-    use_inkscape: bool = False,
-) -> list[tuple[Path, Path]]:
+def export_batch(files: list[str | Path], output_dir: str | Path) -> list[Path]:
     return [
-        export_file(path, output_dir, mode, use_inkscape=use_inkscape)
+        export_file(path, output_dir)
         for path in files
         if Path(path).suffix.lower() in SUPPORTED_EXTENSIONS
     ]
