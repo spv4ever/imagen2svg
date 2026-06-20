@@ -8,7 +8,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from src.processing.preprocess import PreprocessResult, VectorMode
+from src.processing.preprocess import PreprocessResult, TraceSettings, VectorMode
 
 
 def _format_path(points: np.ndarray) -> str:
@@ -18,7 +18,12 @@ def _format_path(points: np.ndarray) -> str:
     return " ".join(commands)
 
 
-def _contours_to_paths(mask: np.ndarray, fill: str = "#000000") -> list[str]:
+def _contours_to_paths(
+    mask: np.ndarray,
+    fill: str = "#000000",
+    *,
+    settings: TraceSettings,
+) -> list[str]:
     foreground = cv2.bitwise_not(mask) if np.mean(mask) > 127 else mask
     foreground = cv2.copyMakeBorder(
         foreground, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0
@@ -45,7 +50,7 @@ def _contours_to_paths(mask: np.ndarray, fill: str = "#000000") -> list[str]:
                 [[[1, 1]]], dtype=contours[current].dtype
             )
             if cv2.contourArea(current_contour) >= min_area:
-                epsilon = max(0.35, 0.0008 * cv2.arcLength(current_contour, True))
+                epsilon = max(0.35, settings.optimize_tolerance)
                 approx = cv2.approxPolyDP(current_contour, epsilon, True)
                 points = approx.reshape(-1, 2)
                 points[:, 0] = np.clip(points[:, 0], 0, mask.shape[1] - 1)
@@ -75,9 +80,13 @@ def vectorize_to_svg(result: PreprocessResult, title: str | None = None) -> str:
         if result.background_color:
             extra_markup = f'  <rect width="100%" height="100%" fill="{result.background_color}"/>\n'
         for color, mask in result.color_layers:
-            paths.extend(_contours_to_paths(mask, fill=color))
+            paths.extend(
+                _contours_to_paths(mask, fill=color, settings=result.trace_settings)
+            )
     else:
-        paths = _contours_to_paths(bitmap, fill="#000000")
+        paths = _contours_to_paths(
+            bitmap, fill="#000000", settings=result.trace_settings
+        )
 
     body = "\n  ".join(paths) if paths else ""
     return (

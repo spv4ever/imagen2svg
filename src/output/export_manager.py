@@ -13,7 +13,7 @@ SUPPORTED_EXTENSIONS = {".png"}
 
 
 def export_file(input_path: str | Path, output_dir: str | Path) -> Path:
-    """Trace a PNG to real SVG paths that CAD tools can import as geometry."""
+    """Trace a PNG using the approved Inkscape brightness-cutoff settings."""
     source = Path(input_path)
     if source.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise ValueError(
@@ -24,7 +24,7 @@ def export_file(input_path: str | Path, output_dir: str | Path) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
 
     svg_path = destination / f"{source.stem}.svg"
-    result = preprocess(str(source), VectorMode.CLEAN)
+    result = preprocess(str(source), VectorMode.SIMPLE)
     svg = optimize_svg(vectorize_to_svg(result, title=source.stem))
     save_svg(svg, svg_path)
 
