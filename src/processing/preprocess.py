@@ -23,6 +23,7 @@ class PreprocessResult:
     bitmap: np.ndarray
     preview: Image.Image
     color_layers: list[tuple[str, np.ndarray]] | None = None
+    background_color: str | None = None
 
 
 def load_image(path: str) -> np.ndarray:
@@ -30,15 +31,88 @@ def load_image(path: str) -> np.ndarray:
     return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
 
-def _binary_from_gray(gray: np.ndarray) -> np.ndarray:
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    return cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+def _ensure_odd(value: int) -> int:
+    return value if value % 2 else value + 1
+
+
+def _foreground_is_light(gray: np.ndarray, thresholded: np.ndarray) -> bool:
+    dark_pixels = gray[thresholded == 0]
+    light_pixels = gray[thresholded == 255]
+    if dark_pixels.size == 0 or light_pixels.size == 0:
+        return False
+    border = np.concatenate(
+        [thresholded[0, :], thresholded[-1, :], thresholded[:, 0], thresholded[:, -1]]
+    )
+    background_is_light = np.mean(border) > 127
+    return not background_is_light and float(light_pixels.mean()) > float(dark_pixels.mean())
+
+
+def _binary_from_gray(gray: np.ndarray, *, clean: bool = False) -> np.ndarray:
+    height, width = gray.shape[:2]
+    scale = max(height, width)
+    blur_size = _ensure_odd(max(3, min(9, scale // 180)))
+    blurred = cv2.GaussianBlur(gray, (blur_size, blur_size), 0)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(blurred)
+    thresholded = cv2.threshold(clahe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+    if _foreground_is_light(gray, thresholded):
+        thresholded = cv2.bitwise_not(thresholded)
+
+    if clean:
+        kernel_size = max(2, min(5, scale // 260))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        thresholded = cv2.morphologyEx(thresholded, cv2.MORPH_OPEN, kernel, iterations=1)
+        thresholded = cv2.morphologyEx(thresholded, cv2.MORPH_CLOSE, kernel, iterations=1)
+        thresholded = cv2.medianBlur(thresholded, 3)
+
+    return thresholded
 
 
 def _preview_from_bitmap(bitmap: np.ndarray) -> Image.Image:
     if len(bitmap.shape) == 2:
         return Image.fromarray(bitmap).convert("RGB")
     return Image.fromarray(cv2.cvtColor(bitmap, cv2.COLOR_BGR2RGB))
+
+
+def _hex_from_bgr(color: np.ndarray) -> str:
+    b, g, r = (int(channel) for channel in color)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _color_layers(image: np.ndarray) -> tuple[np.ndarray, list[tuple[str, np.ndarray]], str]:
+    height, width = image.shape[:2]
+    pixel_count = height * width
+    k = min(8, max(2, pixel_count // 18_000))
+    samples = image.reshape((-1, 3)).astype(np.float32)
+    _, labels, centers = cv2.kmeans(
+        samples,
+        k,
+        None,
+        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 80, 0.1),
+        5,
+        cv2.KMEANS_PP_CENTERS,
+    )
+    centers = np.uint8(centers)
+    flat_labels = labels.flatten()
+    quantized = centers[flat_labels].reshape(image.shape)
+
+    border_labels = np.concatenate(
+        [flat_labels[:width], flat_labels[-width:], flat_labels[::width], flat_labels[width - 1 :: width]]
+    )
+    background_index = int(np.bincount(border_labels, minlength=k).argmax())
+    background_color = _hex_from_bgr(centers[background_index])
+
+    layers: list[tuple[str, np.ndarray]] = []
+    for index in np.argsort(np.bincount(flat_labels, minlength=k))[::-1]:
+        if int(index) == background_index:
+            continue
+        mask = np.where(flat_labels.reshape((height, width)) == index, 255, 0).astype(np.uint8)
+        if cv2.countNonZero(mask) < 8:
+            continue
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        layers.append((_hex_from_bgr(centers[index]), mask))
+    return quantized, layers, background_color
 
 
 def preprocess(path: str, mode: VectorMode) -> PreprocessResult:
@@ -50,43 +124,31 @@ def preprocess(path: str, mode: VectorMode) -> PreprocessResult:
         return PreprocessResult(mode=mode, bitmap=bitmap, preview=_preview_from_bitmap(bitmap))
 
     if mode == VectorMode.CLEAN:
-        bitmap = _binary_from_gray(gray)
-        kernel = np.ones((3, 3), np.uint8)
-        bitmap = cv2.morphologyEx(bitmap, cv2.MORPH_OPEN, kernel, iterations=1)
-        bitmap = cv2.medianBlur(bitmap, 3)
+        bitmap = _binary_from_gray(gray, clean=True)
         return PreprocessResult(mode=mode, bitmap=bitmap, preview=_preview_from_bitmap(bitmap))
 
     if mode == VectorMode.PRINT_3D:
         bitmap = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 5
+            cv2.GaussianBlur(gray, (5, 5), 0),
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            41,
+            7,
         )
-        kernel = np.ones((5, 5), np.uint8)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         bitmap = cv2.morphologyEx(bitmap, cv2.MORPH_CLOSE, kernel, iterations=2)
-        bitmap = cv2.erode(bitmap, np.ones((3, 3), np.uint8), iterations=1)
+        bitmap = cv2.morphologyEx(bitmap, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8), iterations=1)
         return PreprocessResult(mode=mode, bitmap=bitmap, preview=_preview_from_bitmap(bitmap))
 
     if mode == VectorMode.COLORS:
-        samples = image.reshape((-1, 3)).astype(np.float32)
-        _, labels, centers = cv2.kmeans(
-            samples,
-            4,
-            None,
-            (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.2),
-            3,
-            cv2.KMEANS_PP_CENTERS,
-        )
-        centers = np.uint8(centers)
-        quantized = centers[labels.flatten()].reshape(image.shape)
-        layers: list[tuple[str, np.ndarray]] = []
-        for center in centers:
-            mask = cv2.inRange(quantized, center, center)
-            hex_color = "#{:02x}{:02x}{:02x}".format(center[2], center[1], center[0])
-            layers.append((hex_color, mask))
+        quantized, layers, background_color = _color_layers(image)
         return PreprocessResult(
             mode=mode,
             bitmap=quantized,
             preview=_preview_from_bitmap(quantized),
             color_layers=layers,
+            background_color=background_color,
         )
 
     raise ValueError(f"Unsupported vector mode: {mode}")
