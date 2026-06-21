@@ -11,11 +11,63 @@ import numpy as np
 from src.processing.preprocess import PreprocessResult, TraceSettings, VectorMode
 
 
+def _format_number(value: float) -> str:
+    """Format SVG coordinates compactly without losing sub-pixel precision."""
+
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
 def _format_path(points: np.ndarray) -> str:
-    commands = [f"M {int(points[0][0])} {int(points[0][1])}"]
-    commands.extend(f"L {int(x)} {int(y)}" for x, y in points[1:])
+    commands = [
+        f"M {_format_number(float(points[0][0]))} {_format_number(float(points[0][1]))}"
+    ]
+    commands.extend(
+        f"L {_format_number(float(x))} {_format_number(float(y))}" for x, y in points[1:]
+    )
     commands.append("Z")
     return " ".join(commands)
+
+
+def _ellipse_path(contour: np.ndarray) -> str | None:
+    """Return an SVG arc path for contours that are well described by an ellipse."""
+
+    if len(contour) < 12:
+        return None
+
+    area = abs(cv2.contourArea(contour))
+    perimeter = cv2.arcLength(contour, True)
+    if area <= 0 or perimeter <= 0:
+        return None
+
+    circularity = 4.0 * np.pi * area / (perimeter * perimeter)
+    if circularity < 0.72:
+        return None
+
+    (center_x, center_y), (diameter_a, diameter_b), angle = cv2.fitEllipse(contour)
+    radius_x = diameter_a / 2.0
+    radius_y = diameter_b / 2.0
+    if radius_x < 2.0 or radius_y < 2.0:
+        return None
+
+    ellipse_area = np.pi * radius_x * radius_y
+    area_ratio = area / ellipse_area if ellipse_area else 0.0
+    if not 0.78 <= area_ratio <= 1.22:
+        return None
+
+    radians = np.deg2rad(angle)
+    offset_x = radius_x * np.cos(radians)
+    offset_y = radius_x * np.sin(radians)
+    start_x = center_x + offset_x
+    start_y = center_y + offset_y
+    end_x = center_x - offset_x
+    end_y = center_y - offset_y
+    return (
+        f"M {_format_number(start_x)} {_format_number(start_y)} "
+        f"A {_format_number(radius_x)} {_format_number(radius_y)} "
+        f"{_format_number(angle)} 1 0 {_format_number(end_x)} {_format_number(end_y)} "
+        f"A {_format_number(radius_x)} {_format_number(radius_y)} "
+        f"{_format_number(angle)} 1 0 {_format_number(start_x)} {_format_number(start_y)} Z"
+    )
 
 
 def _contours_to_paths(
@@ -50,11 +102,21 @@ def _contours_to_paths(
                 [[[1, 1]]], dtype=contours[current].dtype
             )
             if cv2.contourArea(current_contour) >= min_area:
-                epsilon = max(0.35, settings.optimize_tolerance)
+                current_contour = current_contour.astype(np.float32)
+                current_contour[:, :, 0] = np.clip(
+                    current_contour[:, :, 0], 0, mask.shape[1] - 1
+                )
+                current_contour[:, :, 1] = np.clip(
+                    current_contour[:, :, 1], 0, mask.shape[0] - 1
+                )
+                ellipse = _ellipse_path(current_contour)
+                if ellipse:
+                    subpaths.append(ellipse)
+                    continue
+
+                epsilon = max(0.15, settings.optimize_tolerance)
                 approx = cv2.approxPolyDP(current_contour, epsilon, True)
                 points = approx.reshape(-1, 2)
-                points[:, 0] = np.clip(points[:, 0], 0, mask.shape[1] - 1)
-                points[:, 1] = np.clip(points[:, 1], 0, mask.shape[0] - 1)
                 if len(points) >= 3:
                     subpaths.append(_format_path(points))
 

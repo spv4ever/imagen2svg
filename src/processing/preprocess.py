@@ -89,15 +89,18 @@ def _binary_from_gray(
 
     The reference configuration is a single scan with brightness cutoff at
     0.450, speckles enabled at 2 px, smooth corners at 1.00 and optimization at
-    0.200. Preprocessing mirrors those inputs before contour extraction.
+    0.200. A light bilateral denoise plus unsharp mask is applied before the
+    cutoff so edges stay crisp instead of being softened into irregular blobs.
     """
 
     height, width = gray.shape[:2]
     scale = max(height, width)
     blur_size = _ensure_odd(max(3, min(9, scale // 180))) if clean else 3
-    blurred = cv2.GaussianBlur(gray, (blur_size, blur_size), 0)
+    denoised = cv2.bilateralFilter(gray, 5, 45, 45)
+    blurred = cv2.GaussianBlur(denoised, (blur_size, blur_size), 0)
+    sharp = cv2.addWeighted(denoised, 1.35, blurred, -0.35, 0)
     cutoff = int(round(np.clip(settings.brightness_threshold, 0.0, 1.0) * 255))
-    thresholded = cv2.threshold(blurred, cutoff, 255, cv2.THRESH_BINARY)[1]
+    thresholded = cv2.threshold(sharp, cutoff, 255, cv2.THRESH_BINARY)[1]
 
     if _foreground_is_light(gray, thresholded):
         thresholded = cv2.bitwise_not(thresholded)
