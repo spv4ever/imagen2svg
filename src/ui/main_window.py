@@ -15,11 +15,13 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QComboBox,
     QVBoxLayout,
     QWidget,
 )
 
 from src.output.export_manager import SUPPORTED_EXTENSIONS, export_batch
+from src.processing.preprocess import VectorMode
 
 
 class MainWindow(QMainWindow):
@@ -40,9 +42,14 @@ class MainWindow(QMainWindow):
             label.setStyleSheet("border: 1px dashed #888; padding: 12px;")
 
         self.status_label = QLabel(
-            "Pasada simple · Corte de luminosidad 0.450 · "
+            "Modo mejorado · Corte de luminosidad 0.450 · "
             "Motas 2 · Suavizar 1.00 · Optimizar 0.200 · Negro máx. 28%"
         )
+        self.mode_selector = QComboBox()
+        self.mode_selector.addItem("Mejorado (recomendado)", VectorMode.CLEAN.value)
+        self.mode_selector.addItem("Simple", VectorMode.SIMPLE.value)
+        self.mode_selector.addItem("Impresión 3D", VectorMode.PRINT_3D.value)
+        self.mode_selector.addItem("Colores", VectorMode.COLORS.value)
         self.progress = QProgressBar()
 
         add_button = QPushButton("Añadir imágenes")
@@ -52,6 +59,7 @@ class MainWindow(QMainWindow):
 
         controls = QHBoxLayout()
         controls.addWidget(self.status_label)
+        controls.addWidget(self.mode_selector)
         controls.addWidget(add_button)
         controls.addWidget(process_button)
 
@@ -118,7 +126,8 @@ class MainWindow(QMainWindow):
         results = []
         try:
             for index, path in enumerate(self.files, start=1):
-                results.extend(export_batch([path], output_dir))
+                mode = VectorMode(self.mode_selector.currentData())
+                results.extend(export_batch([path], output_dir, mode=mode))
                 self.progress.setValue(index)
         except RuntimeError as error:
             QMessageBox.critical(self, "Error de exportación", str(error))
