@@ -42,7 +42,19 @@ class PreprocessResult:
 
 
 def load_image(path: str) -> np.ndarray:
-    image = Image.open(path).convert("RGB")
+    image = Image.open(path)
+    has_alpha = image.mode in {"RGBA", "LA"} or (
+        image.mode == "P" and "transparency" in image.info
+    )
+    if has_alpha:
+        # Treat transparent canvas pixels as white so they are not traced as
+        # black artwork.
+        image = image.convert("RGBA")
+        background = Image.new("RGBA", image.size, (255, 255, 255, 255))
+        background.alpha_composite(image)
+        image = background.convert("RGB")
+    else:
+        image = image.convert("RGB")
     return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
 
