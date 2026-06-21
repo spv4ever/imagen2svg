@@ -45,13 +45,13 @@ class MainWindow(QMainWindow):
             "Inkscape detectado" if find_inkscape() else "Inkscape no detectado"
         )
         self.status_label = QLabel(
-            f"{inkscape_status} · SVG plain + segunda pasada compatible con Fusion 360"
+            f"{inkscape_status} · Vectorizar mapa de bits + Plain SVG para Fusion 360"
         )
         self.progress = QProgressBar()
 
         add_button = QPushButton("Añadir imágenes")
         add_button.clicked.connect(self._choose_files)
-        process_button = QPushButton("Convertir a SVG Fusion 360")
+        process_button = QPushButton("Vectorizar a Plain SVG")
         process_button.clicked.connect(self._process_batch)
 
         controls = QHBoxLayout()

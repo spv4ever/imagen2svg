@@ -8,8 +8,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from PIL import Image
-
+TRACE_BITMAP_ACTION = "selection-trace:2,false,true,true,4,1.0,0.20"
 STANDARD_EXPORT_ARGS = ("--export-type=svg", "--export-plain-svg")
 SVG_NS = "http://www.w3.org/2000/svg"
 ET.register_namespace("", SVG_NS)
@@ -54,8 +53,6 @@ FUSION_ATTRIBUTES_TO_DROP = {
 }
 STYLE_SPLIT_RE = re.compile(r"\s*;\s*")
 STYLE_PAIR_RE = re.compile(r"\s*([^:]+)\s*:\s*(.*?)\s*$")
-OPAQUE_ALPHA_THRESHOLD = 8
-WHITE_LUMINANCE_THRESHOLD = 245
 
 
 class InkscapeNotFoundError(RuntimeError):
@@ -77,6 +74,8 @@ def build_plain_svg_command(
     return [
         executable,
         str(source),
+        "--batch-process",
+        f"--actions={_build_trace_actions(destination)}",
         *STANDARD_EXPORT_ARGS,
         f"--export-filename={destination}",
     ]
@@ -128,77 +127,19 @@ def _contains_fusion_geometry(element: ET.Element) -> bool:
     return any(_local_name(node.tag) in FUSION_GEOMETRY_TAGS for node in element.iter())
 
 
-def _row_runs(mask: list[bool]) -> list[tuple[int, int]]:
-    runs = []
-    start: int | None = None
-    for index, filled in enumerate(mask):
-        if filled and start is None:
-            start = index
-        elif not filled and start is not None:
-            runs.append((start, index))
-            start = None
-    if start is not None:
-        runs.append((start, len(mask)))
-    return runs
+def _contains_embedded_image(element: ET.Element) -> bool:
+    return any(_local_name(node.tag) == "image" for node in element.iter())
 
 
-def raster_to_fusion_svg(input_path: str | Path, svg_path: str | Path) -> Path:
-    """Vectorize opaque, non-white pixels into Fusion-importable SVG paths.
-
-    This deliberately creates real SVG path geometry instead of embedding the
-    source bitmap, because Fusion 360 ignores embedded raster images during SVG
-    sketch import and shows its “no compatible information” warning.
-    """
-    source = Path(input_path)
-    destination = Path(svg_path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
-    with Image.open(source) as image:
-        rgba = image.convert("RGBA")
-        width, height = rgba.size
-        pixels = rgba.load()
-        path_chunks: list[str] = []
-
-        for y in range(height):
-            mask = []
-            for x in range(width):
-                red, green, blue, alpha = pixels[x, y]
-                luminance = (red * 299 + green * 587 + blue * 114) / 1000
-                mask.append(
-                    alpha > OPAQUE_ALPHA_THRESHOLD
-                    and luminance < WHITE_LUMINANCE_THRESHOLD
-                )
-            for x_start, x_end in _row_runs(mask):
-                path_chunks.append(
-                    f"M{x_start} {y}H{x_end}V{y + 1}H{x_start}Z"
-                )
-
-    if not path_chunks:
-        raise RuntimeError(
-            f"No se encontró geometría vectorizable en {source.name}. Usa una imagen "
-            "con fondo claro y trazos/zonas oscuras."
+def _build_trace_actions(destination: Path) -> str:
+    return ";".join(
+        (
+            "select-all",
+            TRACE_BITMAP_ACTION,
+            f"export-filename:{destination}",
+            "export-do",
         )
-
-    root = ET.Element(
-        f"{{{SVG_NS}}}svg",
-        {
-            "width": str(width),
-            "height": str(height),
-            "viewBox": f"0 0 {width} {height}",
-        },
     )
-    ET.SubElement(
-        root,
-        f"{{{SVG_NS}}}path",
-        {
-            "fill": "none",
-            "stroke": "#000000",
-            "stroke-width": "0.01",
-            "d": " ".join(path_chunks),
-        },
-    )
-    ET.ElementTree(root).write(destination, encoding="utf-8", xml_declaration=True)
-    return destination
 
 
 def make_fusion360_compatible(svg_path: str | Path) -> Path:
@@ -223,7 +164,7 @@ def export_plain_svg(
     executable: str | None = None,
     fusion360_pass: bool = True,
 ) -> Path:
-    """Convert a PNG/JPEG image to a plain SVG and clean it for Fusion 360."""
+    """Trace a PNG/JPEG bitmap in Inkscape, export plain SVG, then clean it."""
     source = Path(input_path)
     destination = Path(svg_path)
 
@@ -257,9 +198,20 @@ def export_plain_svg(
         raise RuntimeError(f"Inkscape terminó sin crear un SVG válido: {destination}")
 
     if fusion360_pass:
+        root = ET.parse(destination).getroot()
+        had_embedded_image = _contains_embedded_image(root)
         make_fusion360_compatible(destination)
         root = ET.parse(destination).getroot()
         if not _contains_fusion_geometry(root):
-            raster_to_fusion_svg(source, destination)
+            if had_embedded_image:
+                raise RuntimeError(
+                    "Inkscape exportó solo la imagen incrustada y no generó trazado "
+                    "vectorial. Revisa que tu versión de Inkscape soporte la acción "
+                    "selection-trace o vectoriza manualmente con Mapa de bits > "
+                    "Vectorizar mapa de bits y exporta como Plain SVG."
+                )
+            raise RuntimeError(
+                f"El SVG exportado no contiene geometría compatible: {destination}"
+            )
 
     return destination
