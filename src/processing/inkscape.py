@@ -1,75 +1,73 @@
-"""Optional Inkscape CLI integration for SVG export/post-processing."""
+"""Inkscape command-line integration for plain SVG export."""
 
 from __future__ import annotations
 
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
-
 
 STANDARD_EXPORT_ARGS = ("--export-type=svg", "--export-plain-svg")
 
 
+class InkscapeNotFoundError(RuntimeError):
+    """Raised when the Inkscape executable cannot be found."""
+
+
 def find_inkscape() -> str | None:
-    """Return the Inkscape executable path if it is available on PATH."""
+    """Return the Inkscape executable path when it is available on PATH."""
     return shutil.which("inkscape")
 
 
-def is_inkscape_available() -> bool:
-    """Return whether Inkscape can be launched from the current environment."""
-    return find_inkscape() is not None
-
-
-def _run_standard_svg_export(
-    source: Path, destination: Path, *, executable: str | None = None
-) -> bool:
-    """Run Inkscape's standard plain-SVG export command."""
-    inkscape = executable or find_inkscape()
-    if not inkscape:
-        return False
-    if not source.exists():
-        raise FileNotFoundError(source)
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    command = [
-        inkscape,
+def build_plain_svg_command(
+    source: Path,
+    destination: Path,
+    *,
+    executable: str = "inkscape",
+) -> list[str]:
+    """Build the standard Inkscape command used by the application."""
+    return [
+        executable,
         str(source),
         *STANDARD_EXPORT_ARGS,
         f"--export-filename={destination}",
     ]
-    try:
-        subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    except (OSError, subprocess.CalledProcessError):
-        return False
-    return destination.exists() and destination.stat().st_size > 0
 
 
-def export_image_with_inkscape(
-    input_path: str | Path, svg_path: str | Path, *, executable: str | None = None
-) -> bool:
-    """Export an input image directly with Inkscape's standard SVG parameters.
+def export_plain_svg(
+    input_path: str | Path,
+    svg_path: str | Path,
+    *,
+    executable: str | None = None,
+) -> Path:
+    """Convert a PNG/JPEG image to a plain SVG with Inkscape defaults."""
+    source = Path(input_path)
+    destination = Path(svg_path)
 
-    This lets Inkscape create the SVG from the original bitmap instead of first
-    tracing it with OpenCV. The result preserves the source visually and avoids
-    adding differences introduced by the internal vectorizer.
-    """
-    return _run_standard_svg_export(Path(input_path), Path(svg_path), executable=executable)
-
-
-def plain_svg_with_inkscape(svg_path: str | Path, *, executable: str | None = None) -> bool:
-    """Rewrite an SVG as Inkscape's plain SVG format.
-
-    Returns True when Inkscape completed successfully and the file was replaced;
-    returns False when Inkscape is unavailable or the command fails.
-    """
-    source = Path(svg_path)
     if not source.exists():
         raise FileNotFoundError(source)
 
-    with tempfile.TemporaryDirectory(prefix="imagen2svg-inkscape-") as temp_dir:
-        plain_svg = Path(temp_dir) / source.name
-        if not _run_standard_svg_export(source, plain_svg, executable=executable):
-            return False
-        source.write_bytes(plain_svg.read_bytes())
-        return True
+    inkscape = executable or find_inkscape()
+    if not inkscape:
+        raise InkscapeNotFoundError(
+            "No se encontró Inkscape en el PATH. Instala Inkscape o añade "
+            "su ejecutable al PATH para poder exportar SVG plain."
+        )
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = build_plain_svg_command(source, destination, executable=inkscape)
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        details = error.stderr.strip() or error.stdout.strip() or str(error)
+        raise RuntimeError(f"Inkscape no pudo exportar {source.name}: {details}") from error
+
+    if not destination.exists() or destination.stat().st_size == 0:
+        raise RuntimeError(f"Inkscape terminó sin crear un SVG válido: {destination}")
+
+    return destination
