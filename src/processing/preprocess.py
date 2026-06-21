@@ -25,6 +25,7 @@ class TraceSettings:
     speckles: int = 2
     smooth_corners: float = 1.0
     optimize_tolerance: float = 0.2
+    max_foreground_ratio: float = 0.28
 
 
 INKSCAPE_SINGLE_SCAN_SETTINGS = TraceSettings()
@@ -102,16 +103,35 @@ def _binary_from_gray(
     cutoff = int(round(np.clip(settings.brightness_threshold, 0.0, 1.0) * 255))
     thresholded = cv2.threshold(sharp, cutoff, 255, cv2.THRESH_BINARY)[1]
 
+    foreground_is_dark = True
     if _foreground_is_light(gray, thresholded):
         thresholded = cv2.bitwise_not(thresholded)
+        foreground_is_dark = False
+
+    # If the fixed 0.450 cutoff floods the trace, keep only the darkest (or
+    # lightest, for inverted artwork) pixels so shadows/background texture do
+    # not become large black fills.
+    foreground_ratio = (
+        np.count_nonzero(thresholded == 0)
+        if foreground_is_dark
+        else np.count_nonzero(thresholded == 255)
+    ) / float(thresholded.size)
+    max_foreground_ratio = np.clip(settings.max_foreground_ratio, 0.01, 0.95)
+    if foreground_ratio > max_foreground_ratio:
+        percentile = (
+            max_foreground_ratio * 100.0
+            if foreground_is_dark
+            else (1.0 - max_foreground_ratio) * 100.0
+        )
+        balanced_cutoff = int(np.percentile(sharp, percentile))
+        threshold_type = (
+            cv2.THRESH_BINARY if foreground_is_dark else cv2.THRESH_BINARY_INV
+        )
+        thresholded = cv2.threshold(sharp, balanced_cutoff, 255, threshold_type)[1]
 
     if settings.speckles > 0:
         minimum_area = float(settings.speckles * settings.speckles)
-        foreground = (
-            cv2.bitwise_not(thresholded)
-            if np.mean(thresholded) > 127
-            else thresholded
-        )
+        foreground = cv2.bitwise_not(thresholded) if foreground_is_dark else thresholded
         components, labels, stats, _ = cv2.connectedComponentsWithStats(foreground, 8)
         cleaned_foreground = np.zeros_like(foreground)
         for label in range(1, components):
@@ -119,7 +139,7 @@ def _binary_from_gray(
                 cleaned_foreground[labels == label] = 255
         thresholded = (
             cv2.bitwise_not(cleaned_foreground)
-            if np.mean(thresholded) > 127
+            if foreground_is_dark
             else cleaned_foreground
         )
 
