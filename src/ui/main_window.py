@@ -19,8 +19,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.output.export_manager import SUPPORTED_EXTENSIONS, export_batch
-from src.processing.inkscape import InkscapeNotFoundError, find_inkscape
+from src.output.export_manager import SUPPORTED_EXTENSIONS, export_batch_resilient
+from src.processing.inkscape import find_inkscape
 
 
 class MainWindow(QMainWindow):
@@ -116,17 +116,30 @@ class MainWindow(QMainWindow):
         )
         self.progress.setMaximum(len(self.files))
         self.progress.setValue(0)
-        try:
-            results = export_batch(self.files, output_dir)
-            self.progress.setValue(len(self.files))
-        except InkscapeNotFoundError as error:
-            QMessageBox.critical(self, "Inkscape no disponible", str(error))
+        summary = export_batch_resilient(self.files, output_dir)
+        self.progress.setValue(len(self.files))
+
+        if summary.errors and not summary.exported:
+            title = "Inkscape no disponible" if any(
+                "No se encontró Inkscape" in error for error in summary.errors
+            ) else "Error de exportación"
+            QMessageBox.critical(self, title, "\n".join(summary.errors))
             return
-        except (OSError, RuntimeError, ValueError) as error:
-            QMessageBox.critical(self, "Error de exportación", str(error))
+
+        if summary.errors:
+            QMessageBox.warning(
+                self,
+                "Exportación parcial",
+                (
+                    f"Exportados {len(summary.exported)} SVG en {output_dir}.\n\n"
+                    "No se pudieron exportar:\n"
+                    + "\n".join(summary.errors)
+                ),
+            )
             return
+
         QMessageBox.information(
             self,
             "Listo",
-            f"Exportados {len(results)} SVG compatibles con Fusion 360 en {output_dir}.",
+            f"Exportados {len(summary.exported)} SVG compatibles con Fusion 360 en {output_dir}.",
         )
