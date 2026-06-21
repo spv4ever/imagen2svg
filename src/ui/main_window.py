@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
 
         self.status_label = QLabel(
             "Pasada simple · Corte de luminosidad 0.450 · "
-            "Motas 2 · Suavizar 1.00 · Optimizar 0.200"
+            "Motas 2 · Suavizar 1.00 · Optimizar 0.200 · Negro máx. 28%"
         )
         self.progress = QProgressBar()
 
