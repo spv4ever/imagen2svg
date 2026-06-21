@@ -1,4 +1,4 @@
-"""PySide6 drag-and-drop interface for PNG-to-vector-SVG export."""
+"""PySide6 drag-and-drop interface for PNG/JPEG to plain SVG export."""
 
 from __future__ import annotations
 
@@ -15,62 +15,52 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
-    QComboBox,
     QVBoxLayout,
     QWidget,
 )
 
 from src.output.export_manager import SUPPORTED_EXTENSIONS, export_batch
-from src.processing.preprocess import VectorMode
+from src.processing.inkscape import InkscapeNotFoundError, find_inkscape
 
 
 class MainWindow(QMainWindow):
+    """Small desktop window that accepts image drops and exports them with Inkscape."""
+
     def __init__(self) -> None:
         super().__init__()
         self.files: list[Path] = []
-        self.setWindowTitle("Imagen a SVG local")
+        self.setWindowTitle("Imagen a SVG plain")
         self.setAcceptDrops(True)
-        self.resize(900, 600)
+        self.resize(820, 560)
 
         self.queue = QListWidget()
         self.queue.currentRowChanged.connect(self._update_preview)
-        self.before = QLabel("Arrastra PNG aquí")
-        self.after = QLabel("SVG vectorial compatible con CAD")
-        for label in (self.before, self.after):
-            label.setAlignment(Qt.AlignCenter)
-            label.setMinimumSize(320, 260)
-            label.setStyleSheet("border: 1px dashed #888; padding: 12px;")
 
+        self.preview = QLabel("Arrastra imágenes PNG o JPEG aquí")
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setMinimumSize(420, 300)
+        self.preview.setStyleSheet("border: 1px dashed #888; padding: 12px;")
+
+        inkscape_status = "Inkscape detectado" if find_inkscape() else "Inkscape no detectado"
         self.status_label = QLabel(
-            "Modo mejorado · Corte de luminosidad 0.450 · "
-            "Motas 2 · Suavizar 1.00 · Optimizar 0.200 · Negro máx. 28%"
+            f"{inkscape_status} · Exportación estándar: --export-type=svg --export-plain-svg"
         )
-        self.mode_selector = QComboBox()
-        self.mode_selector.addItem("Mejorado (recomendado)", VectorMode.CLEAN.value)
-        self.mode_selector.addItem("Simple", VectorMode.SIMPLE.value)
-        self.mode_selector.addItem("Impresión 3D", VectorMode.PRINT_3D.value)
-        self.mode_selector.addItem("Colores", VectorMode.COLORS.value)
         self.progress = QProgressBar()
 
         add_button = QPushButton("Añadir imágenes")
         add_button.clicked.connect(self._choose_files)
-        process_button = QPushButton("Procesar lote")
+        process_button = QPushButton("Convertir a SVG plain")
         process_button.clicked.connect(self._process_batch)
 
         controls = QHBoxLayout()
         controls.addWidget(self.status_label)
-        controls.addWidget(self.mode_selector)
         controls.addWidget(add_button)
         controls.addWidget(process_button)
-
-        previews = QHBoxLayout()
-        previews.addWidget(self.before)
-        previews.addWidget(self.after)
 
         layout = QVBoxLayout()
         layout.addLayout(controls)
         layout.addWidget(self.queue)
-        layout.addLayout(previews)
+        layout.addWidget(self.preview)
         layout.addWidget(self.progress)
 
         root = QWidget()
@@ -86,7 +76,10 @@ class MainWindow(QMainWindow):
 
     def _choose_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Seleccionar imágenes", "input", "PNG (*.png)"
+            self,
+            "Seleccionar imágenes",
+            "input",
+            "Imágenes (*.png *.jpg *.jpeg)",
         )
         self._add_files([Path(path) for path in paths])
 
@@ -103,35 +96,33 @@ class MainWindow(QMainWindow):
         if row < 0 or row >= len(self.files):
             return
         source = self.files[row]
-        self.before.setPixmap(
+        self.preview.setPixmap(
             QPixmap(str(source)).scaled(
-                self.before.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-        )
-        self.after.setPixmap(
-            QPixmap(str(source)).scaled(
-                self.after.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
         )
 
     def _process_batch(self) -> None:
         if not self.files:
-            QMessageBox.information(self, "Sin imágenes", "Añade al menos un PNG.")
+            QMessageBox.information(
+                self, "Sin imágenes", "Añade al menos una imagen PNG o JPEG."
+            )
             return
         output_dir = (
             QFileDialog.getExistingDirectory(self, "Elegir carpeta de salida", "output")
             or "output"
         )
         self.progress.setMaximum(len(self.files))
-        results = []
+        self.progress.setValue(0)
         try:
-            for index, path in enumerate(self.files, start=1):
-                mode = VectorMode(self.mode_selector.currentData())
-                results.extend(export_batch([path], output_dir, mode=mode))
-                self.progress.setValue(index)
-        except RuntimeError as error:
+            results = export_batch(self.files, output_dir)
+            self.progress.setValue(len(self.files))
+        except InkscapeNotFoundError as error:
+            QMessageBox.critical(self, "Inkscape no disponible", str(error))
+            return
+        except (OSError, RuntimeError, ValueError) as error:
             QMessageBox.critical(self, "Error de exportación", str(error))
             return
         QMessageBox.information(
-            self, "Listo", f"Exportados {len(results)} SVG vectoriales en {output_dir}."
+            self, "Listo", f"Exportados {len(results)} SVG plain en {output_dir}."
         )

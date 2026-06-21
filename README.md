@@ -1,19 +1,24 @@
 # imagen2svg
 
-Conversor local para transformar imágenes PNG en SVG vectoriales con trazados reales, pensados para importarse como geometría en herramientas CAD como Fusion 360.
+Aplicación local mínima para convertir imágenes PNG o JPEG a SVG plain mediante la línea de comandos de Inkscape.
 
-## Flujo actual
+## Objetivo
 
-1. Arrastra o selecciona imágenes PNG.
-2. Revisa la vista previa del PNG original.
-3. Procesa el lote.
-4. Cada PNG se vectoriza por defecto en modo Mejorado, que aplica limpieza morfológica antes de generar rutas. También puedes elegir Simple, Impresión 3D o Colores desde la interfaz. Todos los modos generan elementos `<path>` dentro de un SVG.
+1. Arrastra imágenes `.png`, `.jpg` o `.jpeg` a la ventana, o selecciónalas con el botón **Añadir imágenes**.
+2. Pulsa **Convertir a SVG plain**.
+3. Elige una carpeta de salida.
+4. La aplicación ejecuta Inkscape con los valores estándar de exportación plain SVG:
 
-## Compatibilidad con Fusion 360
+```bash
+inkscape entrada.png --export-type=svg --export-plain-svg --export-filename=salida.svg
+```
 
-Fusion 360 no puede crear un boceto útil desde un SVG que solo contiene una imagen PNG incrustada. Ese tipo de archivo se ve correctamente en algunos visores, pero no incluye curvas, líneas ni contornos importables como geometría.
+No se aplica vectorización propia, filtros OpenCV, limpieza adicional ni modos personalizados. El resultado queda exactamente delegado a Inkscape usando la exportación plain SVG estándar.
 
-La exportación de esta aplicación evita ese problema generando rutas vectoriales reales (`<path d="...">`) a partir de los contornos de la imagen, usando por defecto el modo Mejorado: corte de luminosidad 0.450, Motas 2, Suavizar bordes 1.00, Optimizar 0.200, límite adaptativo de negro al 28% y una limpieza extra para cerrar pequeños cortes y reducir ruido. El modo Simple conserva la pasada básica cuando se quiere comparar el resultado anterior. Inkscape ya no se usa para convertir directamente el PNG a SVG, porque ese flujo puede producir un SVG con mapa de bits incrustado. Si `inkscape` está disponible en el `PATH`, se usa únicamente como postprocesador opcional para normalizar el SVG ya vectorizado a SVG plain.
+## Requisitos
+
+- Python 3.11 o superior.
+- Inkscape instalado y disponible en el `PATH` como `inkscape`.
 
 ## Instalación
 
@@ -29,6 +34,4 @@ pip install -r requirements.txt
 python app.py
 ```
 
-El selector de modo permite cambiar entre `Mejorado`, `Simple`, `Impresión 3D` y `Colores` antes de procesar el lote.
-
-La aplicación crea y usa las carpetas `input/`, `output/` y `temp/` para organizar imágenes, exportaciones y vistas previas temporales.
+La aplicación crea los SVG en la carpeta de salida que selecciones, reutilizando el nombre base de cada imagen: `foto.png` se exporta como `foto.svg`.
