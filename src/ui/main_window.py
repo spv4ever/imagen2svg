@@ -29,7 +29,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.files: list[Path] = []
-        self.setWindowTitle("Imagen a SVG plain")
+        self.setWindowTitle("Imagen a SVG compatible con Fusion 360")
         self.setAcceptDrops(True)
         self.resize(820, 560)
 
@@ -41,15 +41,17 @@ class MainWindow(QMainWindow):
         self.preview.setMinimumSize(420, 300)
         self.preview.setStyleSheet("border: 1px dashed #888; padding: 12px;")
 
-        inkscape_status = "Inkscape detectado" if find_inkscape() else "Inkscape no detectado"
+        inkscape_status = (
+            "Inkscape detectado" if find_inkscape() else "Inkscape no detectado"
+        )
         self.status_label = QLabel(
-            f"{inkscape_status} · Exportación estándar: --export-type=svg --export-plain-svg"
+            f"{inkscape_status} · SVG plain + segunda pasada compatible con Fusion 360"
         )
         self.progress = QProgressBar()
 
         add_button = QPushButton("Añadir imágenes")
         add_button.clicked.connect(self._choose_files)
-        process_button = QPushButton("Convertir a SVG plain")
+        process_button = QPushButton("Convertir a SVG Fusion 360")
         process_button.clicked.connect(self._process_batch)
 
         controls = QHBoxLayout()
@@ -124,5 +126,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error de exportación", str(error))
             return
         QMessageBox.information(
-            self, "Listo", f"Exportados {len(results)} SVG plain en {output_dir}."
+            self,
+            "Listo",
+            f"Exportados {len(results)} SVG compatibles con Fusion 360 en {output_dir}.",
         )

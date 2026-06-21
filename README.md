@@ -1,19 +1,19 @@
 # imagen2svg
 
-Aplicación local mínima para convertir imágenes PNG o JPEG a SVG plain mediante la línea de comandos de Inkscape.
+Aplicación local mínima para convertir imágenes PNG o JPEG a SVG mediante Inkscape y aplicar una segunda pasada conservadora para mejorar la compatibilidad con Fusion 360.
 
 ## Objetivo
 
 1. Arrastra imágenes `.png`, `.jpg` o `.jpeg` a la ventana, o selecciónalas con el botón **Añadir imágenes**.
-2. Pulsa **Convertir a SVG plain**.
+2. Pulsa **Convertir a SVG Fusion 360**.
 3. Elige una carpeta de salida.
-4. La aplicación ejecuta Inkscape con los valores estándar de exportación plain SVG:
+4. La aplicación ejecuta Inkscape con la exportación plain SVG estándar:
 
 ```bash
 inkscape entrada.png --export-type=svg --export-plain-svg --export-filename=salida.svg
 ```
 
-No se aplica vectorización propia, filtros OpenCV, limpieza adicional ni modos personalizados. El resultado queda exactamente delegado a Inkscape usando la exportación plain SVG estándar.
+5. Después aplica una segunda pasada sobre el SVG generado para conservar la geometría buena y quitar elementos que Fusion 360 suele rechazar: metadatos de Inkscape, estilos CSS, clases, filtros, máscaras y clips. Los estilos básicos de relleno y trazo se convierten a atributos SVG antes de eliminar el bloque `style`.
 
 ## Requisitos
 
