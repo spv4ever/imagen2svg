@@ -12,8 +12,12 @@ from src.processing.vectorize import save_svg, vectorize_to_svg
 SUPPORTED_EXTENSIONS = {".png"}
 
 
-def export_file(input_path: str | Path, output_dir: str | Path) -> Path:
-    """Trace a PNG using the approved Inkscape brightness-cutoff settings."""
+def export_file(
+    input_path: str | Path,
+    output_dir: str | Path,
+    mode: VectorMode = VectorMode.CLEAN,
+) -> Path:
+    """Trace a PNG into real SVG paths using the selected preprocessing mode."""
     source = Path(input_path)
     if source.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise ValueError(
@@ -24,7 +28,7 @@ def export_file(input_path: str | Path, output_dir: str | Path) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
 
     svg_path = destination / f"{source.stem}.svg"
-    result = preprocess(str(source), VectorMode.SIMPLE)
+    result = preprocess(str(source), mode)
     svg = optimize_svg(vectorize_to_svg(result, title=source.stem))
     save_svg(svg, svg_path)
 
@@ -37,9 +41,13 @@ def export_file(input_path: str | Path, output_dir: str | Path) -> Path:
     return svg_path
 
 
-def export_batch(files: list[str | Path], output_dir: str | Path) -> list[Path]:
+def export_batch(
+    files: list[str | Path],
+    output_dir: str | Path,
+    mode: VectorMode = VectorMode.CLEAN,
+) -> list[Path]:
     return [
-        export_file(path, output_dir)
+        export_file(path, output_dir, mode=mode)
         for path in files
         if Path(path).suffix.lower() in SUPPORTED_EXTENSIONS
     ]
