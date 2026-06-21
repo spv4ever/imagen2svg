@@ -1,6 +1,6 @@
 # imagen2svg
 
-Aplicación local mínima para convertir imágenes PNG o JPEG a SVG mediante Inkscape y aplicar una segunda pasada conservadora para mejorar la compatibilidad con Fusion 360.
+Aplicación local mínima para convertir imágenes PNG o JPEG a SVG mediante Inkscape y aplicar una segunda pasada conservadora para mejorar la compatibilidad con Fusion 360. Si Inkscape deja un SVG con una imagen incrustada y sin geometría, la app genera una ruta vectorial básica a partir de los píxeles oscuros para evitar el aviso de Fusion sobre geometría no compatible.
 
 ## Objetivo
 
@@ -13,7 +13,8 @@ Aplicación local mínima para convertir imágenes PNG o JPEG a SVG mediante Ink
 inkscape entrada.png --export-type=svg --export-plain-svg --export-filename=salida.svg
 ```
 
-5. Después aplica una segunda pasada sobre el SVG generado para conservar la geometría buena y quitar elementos que Fusion 360 suele rechazar: metadatos de Inkscape, estilos CSS, clases, filtros, máscaras y clips. Los estilos básicos de relleno y trazo se convierten a atributos SVG antes de eliminar el bloque `style`.
+5. Después aplica una segunda pasada sobre el SVG generado para conservar la geometría buena y quitar elementos que Fusion 360 suele rechazar: metadatos de Inkscape, estilos CSS, clases, filtros, máscaras, clips e imágenes incrustadas. Los estilos básicos de relleno y trazo se convierten a atributos SVG antes de eliminar el bloque `style`.
+6. Si el SVG resultante no contiene geometría que Fusion pueda convertir en boceto, se crea automáticamente un SVG con rutas reales usando los píxeles opacos y no blancos de la imagen original.
 
 ## Requisitos
 

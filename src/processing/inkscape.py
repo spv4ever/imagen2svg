@@ -8,6 +8,8 @@ import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from PIL import Image
+
 STANDARD_EXPORT_ARGS = ("--export-type=svg", "--export-plain-svg")
 SVG_NS = "http://www.w3.org/2000/svg"
 ET.register_namespace("", SVG_NS)
@@ -26,7 +28,16 @@ PRESENTATION_ATTRIBUTES = {
     "clip-rule",
 }
 REMOVED_TAGS = {"metadata", "desc", "title"}
-UNSUPPORTED_RENDERING_TAGS = {"filter", "mask", "pattern", "clipPath"}
+UNSUPPORTED_RENDERING_TAGS = {"filter", "mask", "pattern", "clipPath", "image"}
+FUSION_GEOMETRY_TAGS = {
+    "path",
+    "rect",
+    "circle",
+    "ellipse",
+    "line",
+    "polyline",
+    "polygon",
+}
 FUSION_ATTRIBUTE_PREFIXES = (
     "{http://www.inkscape.org/namespaces/inkscape}",
     "{http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd}",
@@ -43,6 +54,8 @@ FUSION_ATTRIBUTES_TO_DROP = {
 }
 STYLE_SPLIT_RE = re.compile(r"\s*;\s*")
 STYLE_PAIR_RE = re.compile(r"\s*([^:]+)\s*:\s*(.*?)\s*$")
+OPAQUE_ALPHA_THRESHOLD = 8
+WHITE_LUMINANCE_THRESHOLD = 245
 
 
 class InkscapeNotFoundError(RuntimeError):
@@ -111,15 +124,85 @@ def _strip_fusion_unfriendly_attributes(element: ET.Element) -> None:
         _strip_fusion_unfriendly_attributes(child)
 
 
-def make_fusion360_compatible(svg_path: str | Path) -> Path:
-    """Apply a conservative cleanup pass for Fusion 360 SVG import.
+def _contains_fusion_geometry(element: ET.Element) -> bool:
+    return any(_local_name(node.tag) in FUSION_GEOMETRY_TAGS for node in element.iter())
 
-    The pass keeps the vector geometry untouched, but removes metadata, Inkscape
-    namespaced attributes, CSS classes/styles, filters, masks and clip paths that
-    commonly make Fusion 360 reject otherwise valid plain SVG files. Inline style
-    declarations for fill/stroke are promoted to presentation attributes before
-    the style attribute is removed.
+
+def _row_runs(mask: list[bool]) -> list[tuple[int, int]]:
+    runs = []
+    start: int | None = None
+    for index, filled in enumerate(mask):
+        if filled and start is None:
+            start = index
+        elif not filled and start is not None:
+            runs.append((start, index))
+            start = None
+    if start is not None:
+        runs.append((start, len(mask)))
+    return runs
+
+
+def raster_to_fusion_svg(input_path: str | Path, svg_path: str | Path) -> Path:
+    """Vectorize opaque, non-white pixels into Fusion-importable SVG paths.
+
+    This deliberately creates real SVG path geometry instead of embedding the
+    source bitmap, because Fusion 360 ignores embedded raster images during SVG
+    sketch import and shows its “no compatible information” warning.
     """
+    source = Path(input_path)
+    destination = Path(svg_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    with Image.open(source) as image:
+        rgba = image.convert("RGBA")
+        width, height = rgba.size
+        pixels = rgba.load()
+        path_chunks: list[str] = []
+
+        for y in range(height):
+            mask = []
+            for x in range(width):
+                red, green, blue, alpha = pixels[x, y]
+                luminance = (red * 299 + green * 587 + blue * 114) / 1000
+                mask.append(
+                    alpha > OPAQUE_ALPHA_THRESHOLD
+                    and luminance < WHITE_LUMINANCE_THRESHOLD
+                )
+            for x_start, x_end in _row_runs(mask):
+                path_chunks.append(
+                    f"M{x_start} {y}H{x_end}V{y + 1}H{x_start}Z"
+                )
+
+    if not path_chunks:
+        raise RuntimeError(
+            f"No se encontró geometría vectorizable en {source.name}. Usa una imagen "
+            "con fondo claro y trazos/zonas oscuras."
+        )
+
+    root = ET.Element(
+        f"{{{SVG_NS}}}svg",
+        {
+            "width": str(width),
+            "height": str(height),
+            "viewBox": f"0 0 {width} {height}",
+        },
+    )
+    ET.SubElement(
+        root,
+        f"{{{SVG_NS}}}path",
+        {
+            "fill": "none",
+            "stroke": "#000000",
+            "stroke-width": "0.01",
+            "d": " ".join(path_chunks),
+        },
+    )
+    ET.ElementTree(root).write(destination, encoding="utf-8", xml_declaration=True)
+    return destination
+
+
+def make_fusion360_compatible(svg_path: str | Path) -> Path:
+    """Apply a conservative cleanup pass for Fusion 360 SVG import."""
     path = Path(svg_path)
     tree = ET.parse(path)
     root = tree.getroot()
@@ -175,5 +258,8 @@ def export_plain_svg(
 
     if fusion360_pass:
         make_fusion360_compatible(destination)
+        root = ET.parse(destination).getroot()
+        if not _contains_fusion_geometry(root):
+            raster_to_fusion_svg(source, destination)
 
     return destination
