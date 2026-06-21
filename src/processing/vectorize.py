@@ -70,6 +70,41 @@ def _ellipse_path(contour: np.ndarray) -> str | None:
     )
 
 
+def _is_large_solid_ellipse_artifact(
+    contour: np.ndarray, *, image_area: int, has_child: bool
+) -> bool:
+    """Detect filled circular/elliptical blobs caused by failed enclosure tracing.
+
+    Circular badges should normally trace as an outline with one or more white
+    child contours. When thresholding loses those children, the SVG becomes a
+    solid black disk. Skip only large, very ellipse-like contours that have no
+    children so interior artwork and legitimate ring paths are preserved.
+    """
+
+    if has_child or len(contour) < 12 or image_area <= 0:
+        return False
+
+    area = abs(cv2.contourArea(contour))
+    if area / float(image_area) < 0.18:
+        return False
+
+    perimeter = cv2.arcLength(contour, True)
+    if perimeter <= 0:
+        return False
+
+    circularity = 4.0 * np.pi * area / (perimeter * perimeter)
+    if circularity < 0.82:
+        return False
+
+    (_, _), (diameter_a, diameter_b), _ = cv2.fitEllipse(contour)
+    longer = max(diameter_a, diameter_b)
+    shorter = min(diameter_a, diameter_b)
+    if shorter <= 0:
+        return False
+
+    return (shorter / longer) >= 0.72
+
+
 def _contours_to_paths(
     mask: np.ndarray,
     fill: str = "#000000",
@@ -91,7 +126,12 @@ def _contours_to_paths(
     min_area = max(3.0, image_area * 0.00001)
     for index, contour in enumerate(contours):
         parent = hierarchy[0][index][3]
+        has_child = hierarchy[0][index][2] != -1
         if parent != -1 or cv2.contourArea(contour) < min_area:
+            continue
+        if _is_large_solid_ellipse_artifact(
+            contour, image_area=image_area, has_child=has_child
+        ):
             continue
 
         subpaths: list[str] = []
