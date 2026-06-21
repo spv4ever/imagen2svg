@@ -92,6 +92,104 @@ def _remove_colored_annotations(image: np.ndarray) -> np.ndarray:
     return cleaned
 
 
+def _recover_flooded_circular_enclosures(
+    thresholded: np.ndarray, gray: np.ndarray, *, foreground_is_dark: bool
+) -> np.ndarray:
+    """Re-threshold large filled circular regions that still contain detail.
+
+    A fixed brightness cutoff can sometimes turn a badge/logo circle into a
+    single foreground blob. Once that happens the contour tracer sees only a
+    solid disk and the drawing inside the circle is lost. For large circular
+    components without holes, use a local Otsu pass over the original grayscale
+    crop and replace the flooded component only when the local pass reveals a
+    substantially smaller amount of foreground detail.
+    """
+
+    foreground = cv2.bitwise_not(thresholded) if foreground_is_dark else thresholded
+    components, labels, stats, _ = cv2.connectedComponentsWithStats(foreground, 8)
+    image_area = thresholded.shape[0] * thresholded.shape[1]
+    recovered = foreground.copy()
+
+    for label in range(1, components):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area / float(image_area) < 0.12:
+            continue
+
+        component = np.where(labels == label, 255, 0).astype(np.uint8)
+        contours, hierarchy = cv2.findContours(
+            component, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if not contours or hierarchy is None or hierarchy[0][0][2] != -1:
+            continue
+
+        contour = contours[0]
+        if len(contour) < 12:
+            continue
+
+        contour_area = abs(cv2.contourArea(contour))
+        perimeter = cv2.arcLength(contour, True)
+        if contour_area <= 0 or perimeter <= 0:
+            continue
+
+        circularity = 4.0 * np.pi * contour_area / (perimeter * perimeter)
+        if circularity < 0.70:
+            continue
+
+        (_, _), (diameter_a, diameter_b), _ = cv2.fitEllipse(contour)
+        if min(diameter_a, diameter_b) / max(diameter_a, diameter_b) < 0.70:
+            continue
+
+        x, y, width, height = cv2.boundingRect(contour)
+        crop = gray[y : y + height, x : x + width]
+        component_crop = component[y : y + height, x : x + width]
+        if crop.size == 0:
+            continue
+
+        _, local = cv2.threshold(
+            crop,
+            0,
+            255,
+            (cv2.THRESH_BINARY if foreground_is_dark else cv2.THRESH_BINARY_INV)
+            | cv2.THRESH_OTSU,
+        )
+        local_foreground = (
+            cv2.bitwise_not(local) if foreground_is_dark else local
+        )
+        local_foreground = cv2.bitwise_and(local_foreground, component_crop)
+
+        original_pixels = cv2.countNonZero(component_crop)
+        recovered_pixels = cv2.countNonZero(local_foreground)
+        component_values = crop
+        if (
+            component_values.size
+            and original_pixels
+            and recovered_pixels >= original_pixels * 0.72
+        ):
+            darkest = int(component_values.min())
+            lightest = int(component_values.max())
+            if lightest - darkest >= 18:
+                detail_cutoff = darkest + min(24, max(8, (lightest - darkest) // 4))
+                threshold_type = (
+                    cv2.THRESH_BINARY
+                    if foreground_is_dark
+                    else cv2.THRESH_BINARY_INV
+                )
+                local = cv2.threshold(crop, detail_cutoff, 255, threshold_type)[1]
+                local_foreground = (
+                    cv2.bitwise_not(local) if foreground_is_dark else local
+                )
+                local_foreground = cv2.bitwise_and(local_foreground, component_crop)
+                recovered_pixels = cv2.countNonZero(local_foreground)
+
+        if original_pixels and 0 < recovered_pixels < original_pixels * 0.72:
+            recovered[labels == label] = 0
+            recovered[y : y + height, x : x + width] = cv2.bitwise_or(
+                recovered[y : y + height, x : x + width], local_foreground
+            )
+
+    return cv2.bitwise_not(recovered) if foreground_is_dark else recovered
+
+
 def _binary_from_gray(
     gray: np.ndarray,
     *,
@@ -120,6 +218,10 @@ def _binary_from_gray(
         thresholded = cv2.bitwise_not(thresholded)
         foreground_is_dark = False
 
+    thresholded = _recover_flooded_circular_enclosures(
+        thresholded, gray, foreground_is_dark=foreground_is_dark
+    )
+
     # If the fixed 0.450 cutoff floods the trace, keep only the darkest (or
     # lightest, for inverted artwork) pixels so shadows/background texture do
     # not become large black fills.
@@ -140,6 +242,10 @@ def _binary_from_gray(
             cv2.THRESH_BINARY if foreground_is_dark else cv2.THRESH_BINARY_INV
         )
         thresholded = cv2.threshold(sharp, balanced_cutoff, 255, threshold_type)[1]
+
+    thresholded = _recover_flooded_circular_enclosures(
+        thresholded, gray, foreground_is_dark=foreground_is_dark
+    )
 
     if settings.speckles > 0:
         minimum_area = float(settings.speckles * settings.speckles)
@@ -164,6 +270,9 @@ def _binary_from_gray(
             thresholded, cv2.MORPH_CLOSE, kernel, iterations=1
         )
         thresholded = cv2.medianBlur(thresholded, 3)
+        thresholded = _recover_flooded_circular_enclosures(
+            thresholded, gray, foreground_is_dark=foreground_is_dark
+        )
 
     return thresholded
 

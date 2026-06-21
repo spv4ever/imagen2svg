@@ -130,8 +130,19 @@ def _contours_to_paths(
         if parent != -1 or cv2.contourArea(contour) < min_area:
             continue
         if _is_large_solid_ellipse_artifact(
-            contour, image_area=image_area, has_child=has_child
+            contour, image_area=image_area, has_child=False
         ):
+            ellipse = _ellipse_path(
+                (contour - np.array([[[1, 1]]], dtype=contour.dtype)).astype(
+                    np.float32
+                )
+            )
+            if ellipse:
+                path_data = html.escape(ellipse)
+                paths.append(
+                    f'<path d="{path_data}" fill="none" stroke="{fill}" '
+                    'stroke-width="1" vector-effect="non-scaling-stroke"/>'
+                )
             continue
 
         subpaths: list[str] = []
