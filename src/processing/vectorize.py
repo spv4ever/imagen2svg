@@ -71,7 +71,11 @@ def _ellipse_path(contour: np.ndarray) -> str | None:
 
 
 def _is_large_solid_ellipse_artifact(
-    contour: np.ndarray, *, image_area: int, has_child: bool
+    contour: np.ndarray,
+    *,
+    image_area: int,
+    has_child: bool,
+    foreground_density: float,
 ) -> bool:
     """Detect filled circular/elliptical blobs caused by failed enclosure tracing.
 
@@ -82,6 +86,12 @@ def _is_large_solid_ellipse_artifact(
     """
 
     if has_child or len(contour) < 12 or image_area <= 0:
+        return False
+
+    # A legitimate filled black circle is dense foreground inside its contour.
+    # Failed enclosure recovery leaves only a thin circular outline whose contour
+    # still encloses a large area, so its actual foreground density is low.
+    if foreground_density >= 0.45:
         return False
 
     area = abs(cv2.contourArea(contour))
@@ -129,8 +139,18 @@ def _contours_to_paths(
         has_child = hierarchy[0][index][2] != -1
         if parent != -1 or cv2.contourArea(contour) < min_area:
             continue
+        contour_area = abs(cv2.contourArea(contour))
+        contour_mask = np.zeros_like(foreground)
+        cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+        foreground_pixels = cv2.countNonZero(cv2.bitwise_and(foreground, contour_mask))
+        foreground_density = (
+            foreground_pixels / contour_area if contour_area > 0 else 0.0
+        )
         if _is_large_solid_ellipse_artifact(
-            contour, image_area=image_area, has_child=False
+            contour,
+            image_area=image_area,
+            has_child=False,
+            foreground_density=foreground_density,
         ):
             ellipse = _ellipse_path(
                 (contour - np.array([[[1, 1]]], dtype=contour.dtype)).astype(

@@ -21,3 +21,18 @@ def test_flooded_circle_keeps_inner_artwork_visible():
     assert bitmap.mean() > 220
     assert 'fill="none"' in svg
     assert svg.count("<path") >= 2
+
+
+def test_solid_black_circle_stays_filled():
+    image = np.full((200, 200), 255, np.uint8)
+    cv2.circle(image, (100, 100), 70, 0, -1)
+
+    bitmap = _binary_from_gray(image)
+    svg = vectorize_to_svg(
+        PreprocessResult(mode=VectorMode.SIMPLE, bitmap=bitmap, preview=None),
+        title="solid-black-circle",
+    )
+
+    assert bitmap[100, 100] == 0
+    assert 'fill="#000000"' in svg
+    assert 'fill="none"' not in svg
