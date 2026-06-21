@@ -3,7 +3,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.output.export_manager import SUPPORTED_EXTENSIONS, export_batch, export_file
+from src.output.export_manager import (
+    SUPPORTED_EXTENSIONS,
+    export_batch,
+    export_batch_resilient,
+    export_file,
+)
 from src.processing.inkscape import (
     InkscapeNotFoundError,
     build_plain_svg_command,
@@ -94,6 +99,28 @@ def test_export_batch_skips_unsupported_files(tmp_path):
         results = export_batch([png, jpg, txt], tmp_path / "out")
 
     assert results == [tmp_path / "out" / "one.svg", tmp_path / "out" / "two.svg"]
+
+
+def test_export_batch_resilient_collects_errors_and_continues(tmp_path):
+    good = tmp_path / "good.png"
+    bad = tmp_path / "bad.jpg"
+    ignored = tmp_path / "notes.txt"
+    for path in (good, bad, ignored):
+        path.write_bytes(b"data")
+
+    def fake_export(source, destination):
+        if Path(source).name == "bad.jpg":
+            raise RuntimeError("falló Inkscape")
+        return Path(destination)
+
+    with patch(
+        "src.output.export_manager.export_plain_svg", side_effect=fake_export
+    ):
+        summary = export_batch_resilient([good, bad, ignored], tmp_path / "out")
+
+    assert summary.exported == [tmp_path / "out" / "good.svg"]
+    assert summary.failed_count == 1
+    assert summary.errors == ["bad.jpg: falló Inkscape"]
 
 
 def test_fusion360_pass_converts_style_and_removes_unfriendly_svg_data(tmp_path):
