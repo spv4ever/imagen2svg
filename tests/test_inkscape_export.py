@@ -25,6 +25,8 @@ def test_build_plain_svg_command_uses_standard_inkscape_args(tmp_path):
     assert command == [
         "inkscape",
         str(source),
+        "--batch-process",
+        f"--actions=select-all;selection-trace:2,false,true,true,4,1.0,0.20;export-filename:{destination};export-do",
         "--export-type=svg",
         "--export-plain-svg",
         f"--export-filename={destination}",
@@ -33,14 +35,14 @@ def test_build_plain_svg_command_uses_standard_inkscape_args(tmp_path):
 
 def test_export_plain_svg_runs_inkscape_and_returns_destination(tmp_path):
     source = tmp_path / "photo.jpeg"
-    from PIL import Image
-
-    Image.new("RGB", (1, 1), "black").save(source)
+    source.write_bytes(b"jpeg")
     destination = tmp_path / "out" / "photo.svg"
 
     def fake_run(command, check, stdout, stderr, text):
         destination.write_text(
-            '<svg xmlns="http://www.w3.org/2000/svg" />', encoding="utf-8"
+            '<svg xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M 0 0 L 1 1" /></svg>',
+            encoding="utf-8",
         )
         return Mock(returncode=0)
 
@@ -53,6 +55,8 @@ def test_export_plain_svg_runs_inkscape_and_returns_destination(tmp_path):
     assert run.call_args.args[0] == [
         "inkscape",
         str(source),
+        "--batch-process",
+        f"--actions=select-all;selection-trace:2,false,true,true,4,1.0,0.20;export-filename:{destination};export-do",
         "--export-type=svg",
         "--export-plain-svg",
         f"--export-filename={destination}",
@@ -140,34 +144,10 @@ def test_export_plain_svg_runs_fusion360_pass_by_default(tmp_path):
     assert 'stroke="#111"' in destination.read_text(encoding="utf-8")
 
 
-def test_raster_to_fusion_svg_creates_real_path_geometry(tmp_path):
-    from PIL import Image
-
-    source = tmp_path / "pixel.png"
-    destination = tmp_path / "pixel.svg"
-    image = Image.new("RGBA", (3, 2), "white")
-    image.putpixel((1, 0), (0, 0, 0, 255))
-    image.putpixel((2, 0), (0, 0, 0, 255))
-    image.save(source)
-
-    from src.processing.inkscape import raster_to_fusion_svg
-
-    raster_to_fusion_svg(source, destination)
-
-    result = destination.read_text(encoding="utf-8")
-    assert "<path" in result
-    assert "<image" not in result
-    assert 'd="M1 0H3V1H1Z"' in result
-
-
-def test_export_plain_svg_vectorizes_when_inkscape_exports_only_embedded_image(tmp_path):
-    from PIL import Image
-
+def test_export_plain_svg_fails_if_trace_bitmap_produces_only_embedded_image(tmp_path):
     source = tmp_path / "photo.png"
+    source.write_bytes(b"png")
     destination = tmp_path / "photo.svg"
-    image = Image.new("RGBA", (2, 1), "white")
-    image.putpixel((0, 0), (0, 0, 0, 255))
-    image.save(source)
 
     def fake_run(command, check, stdout, stderr, text):
         destination.write_text(
@@ -179,9 +159,9 @@ def test_export_plain_svg_vectorizes_when_inkscape_exports_only_embedded_image(t
     with patch("src.processing.inkscape.find_inkscape", return_value="inkscape"), patch(
         "src.processing.inkscape.subprocess.run", side_effect=fake_run
     ):
-        export_plain_svg(source, destination)
+        with pytest.raises(RuntimeError, match="no generó trazado vectorial"):
+            export_plain_svg(source, destination)
 
     result = destination.read_text(encoding="utf-8")
-    assert "<path" in result
     assert "<image" not in result
-    assert 'd="M0 0H1V1H0Z"' in result
+    assert "<path" not in result
